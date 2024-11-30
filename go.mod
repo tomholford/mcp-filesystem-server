@@ -2,7 +2,7 @@ module github.com/mark3labs/mcp-filesystem-server
 
 go 1.23.2
 
-require github.com/mark3labs/mcp-go v0.2.0
+require github.com/mark3labs/mcp-go v0.3.0
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
