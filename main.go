@@ -186,7 +186,7 @@ func (s *FilesystemServer) handleListTools(
 					"the contents of a single file. Only works within allowed directories.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
-					Properties: map[string]interface{}{
+					Properties: mcp.ToolInputSchemaProperties{
 						"path": map[string]interface{}{
 							"type":        "string",
 							"description": "Path to the file to read",
@@ -201,7 +201,7 @@ func (s *FilesystemServer) handleListTools(
 					"or compare multiple files.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
-					Properties: map[string]interface{}{
+					Properties: mcp.ToolInputSchemaProperties{
 						"paths": map[string]interface{}{
 							"type": "array",
 							"items": map[string]interface{}{
@@ -218,7 +218,7 @@ func (s *FilesystemServer) handleListTools(
 					"Use with caution as it will overwrite existing files without warning.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
-					Properties: map[string]interface{}{
+					Properties: mcp.ToolInputSchemaProperties{
 						"path": map[string]interface{}{
 							"type":        "string",
 							"description": "Path where to write the file",
@@ -236,7 +236,7 @@ func (s *FilesystemServer) handleListTools(
 					"Can create multiple nested directories in one operation.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
-					Properties: map[string]interface{}{
+					Properties: mcp.ToolInputSchemaProperties{
 						"path": map[string]interface{}{
 							"type":        "string",
 							"description": "Path of the directory to create",
@@ -250,7 +250,7 @@ func (s *FilesystemServer) handleListTools(
 					"Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
-					Properties: map[string]interface{}{
+					Properties: mcp.ToolInputSchemaProperties{
 						"path": map[string]interface{}{
 							"type":        "string",
 							"description": "Path of the directory to list",
@@ -264,7 +264,7 @@ func (s *FilesystemServer) handleListTools(
 					"and rename them in a single operation.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
-					Properties: map[string]interface{}{
+					Properties: mcp.ToolInputSchemaProperties{
 						"source": map[string]interface{}{
 							"type":        "string",
 							"description": "Source path of the file or directory",
@@ -282,7 +282,7 @@ func (s *FilesystemServer) handleListTools(
 					"Searches through all subdirectories from the starting path.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
-					Properties: map[string]interface{}{
+					Properties: mcp.ToolInputSchemaProperties{
 						"path": map[string]interface{}{
 							"type":        "string",
 							"description": "Starting path for the search",
@@ -300,7 +300,7 @@ func (s *FilesystemServer) handleListTools(
 					"creation time, last modified time, permissions, and type.",
 				InputSchema: mcp.ToolInputSchema{
 					Type: "object",
-					Properties: map[string]interface{}{
+					Properties: mcp.ToolInputSchemaProperties{
 						"path": map[string]interface{}{
 							"type":        "string",
 							"description": "Path to the file or directory",
@@ -313,7 +313,7 @@ func (s *FilesystemServer) handleListTools(
 				Description: "Returns the list of directories that this server is allowed to access.",
 				InputSchema: mcp.ToolInputSchema{
 					Type:       "object",
-					Properties: map[string]interface{}{},
+					Properties: mcp.ToolInputSchemaProperties{},
 				},
 			},
 		},
@@ -333,9 +333,7 @@ func (s *FilesystemServer) handleInitialize(
 		},
 		ProtocolVersion: "2024-11-05",
 		Capabilities: mcp.ServerCapabilities{
-			Tools: &struct {
-				ListChanged bool `json:"listChanged"`
-			}{
+			Tools: &mcp.ServerCapabilitiesTools{
 				ListChanged: true,
 			},
 		},
@@ -376,7 +374,7 @@ func (s *FilesystemServer) handleToolCall(
 		content, err := os.ReadFile(validPath)
 		if err != nil {
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{
+				Content: []interface{}{
 					mcp.TextContent{
 						Type: "text",
 						Text: fmt.Sprintf("Error reading file: %v", err),
@@ -387,7 +385,7 @@ func (s *FilesystemServer) handleToolCall(
 		}
 
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: string(content),
@@ -428,7 +426,7 @@ func (s *FilesystemServer) handleToolCall(
 		}
 
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: result.String(),
@@ -453,7 +451,7 @@ func (s *FilesystemServer) handleToolCall(
 
 		if err := os.WriteFile(validPath, []byte(content), 0644); err != nil {
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{
+				Content: []interface{}{
 					mcp.TextContent{
 						Type: "text",
 						Text: fmt.Sprintf("Error writing file: %v", err),
@@ -464,7 +462,7 @@ func (s *FilesystemServer) handleToolCall(
 		}
 
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf("Successfully wrote to %s", path),
@@ -485,7 +483,7 @@ func (s *FilesystemServer) handleToolCall(
 
 		if err := os.MkdirAll(validPath, 0755); err != nil {
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{
+				Content: []interface{}{
 					mcp.TextContent{
 						Type: "text",
 						Text: fmt.Sprintf("Error creating directory: %v", err),
@@ -496,7 +494,7 @@ func (s *FilesystemServer) handleToolCall(
 		}
 
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf(
@@ -521,7 +519,7 @@ func (s *FilesystemServer) handleToolCall(
 		entries, err := os.ReadDir(validPath)
 		if err != nil {
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{
+				Content: []interface{}{
 					mcp.TextContent{
 						Type: "text",
 						Text: fmt.Sprintf("Error reading directory: %v", err),
@@ -541,7 +539,7 @@ func (s *FilesystemServer) handleToolCall(
 		}
 
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: result.String(),
@@ -570,7 +568,7 @@ func (s *FilesystemServer) handleToolCall(
 
 		if err := os.Rename(validSource, validDest); err != nil {
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{
+				Content: []interface{}{
 					mcp.TextContent{
 						Type: "text",
 						Text: fmt.Sprintf("Error moving file: %v", err),
@@ -581,7 +579,7 @@ func (s *FilesystemServer) handleToolCall(
 		}
 
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf(
@@ -611,7 +609,7 @@ func (s *FilesystemServer) handleToolCall(
 		results, err := s.searchFiles(validPath, pattern)
 		if err != nil {
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{
+				Content: []interface{}{
 					mcp.TextContent{
 						Type: "text",
 						Text: fmt.Sprintf("Error searching files: %v", err),
@@ -622,7 +620,7 @@ func (s *FilesystemServer) handleToolCall(
 		}
 
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: strings.Join(results, "\n"),
@@ -644,7 +642,7 @@ func (s *FilesystemServer) handleToolCall(
 		info, err := s.getFileStats(validPath)
 		if err != nil {
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{
+				Content: []interface{}{
 					mcp.TextContent{
 						Type: "text",
 						Text: fmt.Sprintf("Error getting file info: %v", err),
@@ -655,7 +653,7 @@ func (s *FilesystemServer) handleToolCall(
 		}
 
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf(
@@ -674,7 +672,7 @@ func (s *FilesystemServer) handleToolCall(
 
 	case "list_allowed_directories":
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{
+			Content: []interface{}{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf(
