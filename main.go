@@ -325,6 +325,11 @@ func isTextFile(mimeType string) bool {
 		strings.Contains(mimeType, "+json")
 }
 
+// isImageFile determines if a file is an image based on MIME type
+func isImageFile(mimeType string) bool {
+	return strings.HasPrefix(mimeType, "image/")
+}
+
 // pathToResourceURI converts a file path to a resource URI
 func pathToResourceURI(path string) string {
 	return "file://" + path
@@ -575,8 +580,44 @@ func (s *FilesystemServer) handleReadFile(
 				},
 			},
 		}, nil
+	} else if isImageFile(mimeType) {
+		// It's an image file, return as image content
+		if info.Size() <= MAX_BASE64_SIZE {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Image file: %s (%s, %d bytes)", validPath, mimeType, info.Size()),
+					},
+					mcp.ImageContent{
+						Type:     "image",
+						Data:     base64.StdEncoding.EncodeToString(content),
+						MIMEType: mimeType,
+					},
+				},
+			}, nil
+		} else {
+			// Too large for base64, return a reference
+			resourceURI := pathToResourceURI(validPath)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Image file is too large to display inline (%d bytes). Access it via resource URI: %s", info.Size(), resourceURI),
+					},
+					mcp.EmbeddedResource{
+						Type: "resource",
+						Resource: mcp.TextResourceContents{
+							URI:      resourceURI,
+							MIMEType: "text/plain",
+							Text:     fmt.Sprintf("Large image: %s (%s, %d bytes)", validPath, mimeType, info.Size()),
+						},
+					},
+				},
+			}, nil
+		}
 	} else {
-		// It's a binary file
+		// It's another type of binary file
 		resourceURI := pathToResourceURI(validPath)
 
 		if info.Size() <= MAX_BASE64_SIZE {
