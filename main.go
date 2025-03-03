@@ -1132,6 +1132,15 @@ func (s *FilesystemServer) handleGetFileInfo(
 	}
 
 	resourceURI := pathToResourceURI(validPath)
+	
+	// Determine file type text
+	var fileTypeText string
+	if info.IsDirectory {
+		fileTypeText = "Directory"
+	} else {
+		fileTypeText = "File"
+	}
+	
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
@@ -1156,7 +1165,7 @@ func (s *FilesystemServer) handleGetFileInfo(
 					URI:      resourceURI,
 					MIMEType: "text/plain",
 					Text:     fmt.Sprintf("%s: %s (%s, %d bytes)", 
-						info.IsDirectory ? "Directory" : "File", 
+						fileTypeText, 
 						validPath, 
 						mimeType, 
 						info.Size),
