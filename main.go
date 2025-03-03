@@ -49,7 +49,9 @@ func NewFilesystemServer(allowedDirs []string) (*FilesystemServer, error) {
 			return nil, fmt.Errorf("path is not a directory: %s", abs)
 		}
 
-		normalized = append(normalized, filepath.Clean(strings.ToLower(abs)))
+		// Ensure the path ends with a separator to prevent prefix matching issues
+		// For example, /tmp/foo should not match /tmp/foobar
+		normalized = append(normalized, filepath.Clean(abs)+string(filepath.Separator))
 	}
 
 	s := &FilesystemServer{
@@ -144,23 +146,41 @@ func NewFilesystemServer(allowedDirs []string) (*FilesystemServer, error) {
 	return s, nil
 }
 
+// isPathInAllowedDirs checks if a path is within any of the allowed directories
+func (s *FilesystemServer) isPathInAllowedDirs(path string) bool {
+	// Ensure path is absolute and clean
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	
+	// Add trailing separator to ensure we're checking a directory or a file within a directory
+	// and not a prefix match (e.g., /tmp/foo should not match /tmp/foobar)
+	if !strings.HasSuffix(absPath, string(filepath.Separator)) {
+		// If it's a file, we need to check its directory
+		if info, err := os.Stat(absPath); err == nil && !info.IsDir() {
+			absPath = filepath.Dir(absPath) + string(filepath.Separator)
+		} else {
+			absPath = absPath + string(filepath.Separator)
+		}
+	}
+
+	for _, dir := range s.allowedDirs {
+		if strings.HasPrefix(absPath, dir) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *FilesystemServer) validatePath(requestedPath string) (string, error) {
 	abs, err := filepath.Abs(requestedPath)
 	if err != nil {
 		return "", fmt.Errorf("invalid path: %w", err)
 	}
 
-	normalized := filepath.Clean(strings.ToLower(abs))
-
 	// Check if path is within allowed directories
-	allowed := false
-	for _, dir := range s.allowedDirs {
-		if strings.HasPrefix(normalized, dir) {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !s.isPathInAllowedDirs(abs) {
 		return "", fmt.Errorf(
 			"access denied - path outside allowed directories: %s",
 			abs,
@@ -179,26 +199,23 @@ func (s *FilesystemServer) validatePath(requestedPath string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("parent directory does not exist: %s", parent)
 		}
-		normalizedParent := filepath.Clean(strings.ToLower(realParent))
-		for _, dir := range s.allowedDirs {
-			if strings.HasPrefix(normalizedParent, dir) {
-				return abs, nil
-			}
+		
+		if !s.isPathInAllowedDirs(realParent) {
+			return "", fmt.Errorf(
+				"access denied - parent directory outside allowed directories",
+			)
 		}
-		return "", fmt.Errorf(
-			"access denied - parent directory outside allowed directories",
-		)
+		return abs, nil
 	}
 
-	normalizedReal := filepath.Clean(strings.ToLower(realPath))
-	for _, dir := range s.allowedDirs {
-		if strings.HasPrefix(normalizedReal, dir) {
-			return realPath, nil
-		}
+	// Check if the real path (after resolving symlinks) is still within allowed directories
+	if !s.isPathInAllowedDirs(realPath) {
+		return "", fmt.Errorf(
+			"access denied - symlink target outside allowed directories",
+		)
 	}
-	return "", fmt.Errorf(
-		"access denied - symlink target outside allowed directories",
-	)
+	
+	return realPath, nil
 }
 
 func (s *FilesystemServer) getFileStats(path string) (FileInfo, error) {
@@ -261,7 +278,41 @@ func (s *FilesystemServer) handleReadFile(
 
 	validPath, err := s.validatePath(path)
 	if err != nil {
-		return nil, err
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	// Check if it's a directory
+	info, err := os.Stat(validPath)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+	
+	if info.IsDir() {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: "Error: Cannot read a directory, use list_directory instead",
+				},
+			},
+			IsError: true,
+		}, nil
 	}
 
 	content, err := os.ReadFile(validPath)
@@ -302,7 +353,42 @@ func (s *FilesystemServer) handleWriteFile(
 
 	validPath, err := s.validatePath(path)
 	if err != nil {
-		return nil, err
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	// Check if it's a directory
+	if info, err := os.Stat(validPath); err == nil && info.IsDir() {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: "Error: Cannot write to a directory",
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	// Create parent directories if they don't exist
+	parentDir := filepath.Dir(validPath)
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error creating parent directories: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
 	}
 
 	if err := os.WriteFile(validPath, []byte(content), 0644); err != nil {
@@ -338,7 +424,41 @@ func (s *FilesystemServer) handleListDirectory(
 
 	validPath, err := s.validatePath(path)
 	if err != nil {
-		return nil, err
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	// Check if it's a directory
+	info, err := os.Stat(validPath)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+	
+	if !info.IsDir() {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: "Error: Path is not a directory",
+				},
+			},
+			IsError: true,
+		}, nil
 	}
 
 	entries, err := os.ReadDir(validPath)
@@ -355,10 +475,12 @@ func (s *FilesystemServer) handleListDirectory(
 	}
 
 	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Directory listing for: %s\n\n", validPath))
+	
 	for _, entry := range entries {
 		prefix := "[FILE]"
 		if entry.IsDir() {
-			prefix = "[DIR]"
+			prefix = "[DIR] "
 		}
 		fmt.Fprintf(&result, "%s %s\n", prefix, entry.Name())
 	}
@@ -384,7 +506,38 @@ func (s *FilesystemServer) handleCreateDirectory(
 
 	validPath, err := s.validatePath(path)
 	if err != nil {
-		return nil, err
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	// Check if path already exists
+	if info, err := os.Stat(validPath); err == nil {
+		if info.IsDir() {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Directory already exists: %s", path),
+					},
+				},
+			}, nil
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: Path exists but is not a directory: %s", path),
+				},
+			},
+			IsError: true,
+		}, nil
 	}
 
 	if err := os.MkdirAll(validPath, 0755); err != nil {
@@ -424,11 +577,55 @@ func (s *FilesystemServer) handleMoveFile(
 
 	validSource, err := s.validatePath(source)
 	if err != nil {
-		return nil, err
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error with source path: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
 	}
+	
+	// Check if source exists
+	if _, err := os.Stat(validSource); os.IsNotExist(err) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: Source does not exist: %s", source),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+	
 	validDest, err := s.validatePath(destination)
 	if err != nil {
-		return nil, err
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error with destination path: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+	
+	// Create parent directory for destination if it doesn't exist
+	destDir := filepath.Dir(validDest)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error creating destination directory: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
 	}
 
 	if err := os.Rename(validSource, validDest); err != nil {
@@ -472,7 +669,41 @@ func (s *FilesystemServer) handleSearchFiles(
 
 	validPath, err := s.validatePath(path)
 	if err != nil {
-		return nil, err
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+	
+	// Check if it's a directory
+	info, err := os.Stat(validPath)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+	
+	if !info.IsDir() {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: "Error: Search path must be a directory",
+				},
+			},
+			IsError: true,
+		}, nil
 	}
 
 	results, err := s.searchFiles(validPath, pattern)
@@ -489,11 +720,22 @@ func (s *FilesystemServer) handleSearchFiles(
 		}, nil
 	}
 
+	if len(results) == 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("No files found matching pattern '%s' in %s", pattern, path),
+				},
+			},
+		}, nil
+	}
+
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
-				Text: strings.Join(results, "\n"),
+				Text: fmt.Sprintf("Found %d results:\n%s", len(results), strings.Join(results, "\n")),
 			},
 		},
 	}, nil
@@ -510,7 +752,15 @@ func (s *FilesystemServer) handleGetFileInfo(
 
 	validPath, err := s.validatePath(path)
 	if err != nil {
-		return nil, err
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
 	}
 
 	info, err := s.getFileStats(validPath)
@@ -531,7 +781,8 @@ func (s *FilesystemServer) handleGetFileInfo(
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf(
-					"Size: %d\nCreated: %s\nModified: %s\nAccessed: %s\nIsDirectory: %v\nIsFile: %v\nPermissions: %s",
+					"File information for: %s\n\nSize: %d bytes\nCreated: %s\nModified: %s\nAccessed: %s\nIsDirectory: %v\nIsFile: %v\nPermissions: %s",
+					validPath,
 					info.Size,
 					info.Created.Format(time.RFC3339),
 					info.Modified.Format(time.RFC3339),
@@ -549,13 +800,19 @@ func (s *FilesystemServer) handleListAllowedDirectories(
 	ctx context.Context,
 	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
+	// Remove the trailing separator for display purposes
+	displayDirs := make([]string, len(s.allowedDirs))
+	for i, dir := range s.allowedDirs {
+		displayDirs[i] = strings.TrimSuffix(dir, string(filepath.Separator))
+	}
+
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf(
 					"Allowed directories:\n%s",
-					strings.Join(s.allowedDirs, "\n"),
+					strings.Join(displayDirs, "\n"),
 				),
 			},
 		},
