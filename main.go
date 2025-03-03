@@ -183,6 +183,7 @@ func (s *FilesystemServer) isPathInAllowedDirs(path string) bool {
 		}
 	}
 
+	// Check if the path is within any of the allowed directories
 	for _, dir := range s.allowedDirs {
 		if strings.HasPrefix(absPath, dir) {
 			return true
@@ -192,6 +193,7 @@ func (s *FilesystemServer) isPathInAllowedDirs(path string) bool {
 }
 
 func (s *FilesystemServer) validatePath(requestedPath string) (string, error) {
+	// Always convert to absolute path first
 	abs, err := filepath.Abs(requestedPath)
 	if err != nil {
 		return "", fmt.Errorf("invalid path: %w", err)
@@ -454,7 +456,25 @@ func (s *FilesystemServer) handleReadFile(
 ) (*mcp.CallToolResult, error) {
 	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
-		return nil, fmt.Errorf("path must be a string")
+		return nil,  fmt.Errorf("path must be a string")
+	}
+
+	// Handle empty or relative paths like "." or "./" by converting to absolute path
+	if path == "." || path == "./" {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Error resolving current directory: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil
+		}
+		path = cwd
 	}
 
 	validPath, err := s.validatePath(path)
@@ -612,6 +632,24 @@ func (s *FilesystemServer) handleWriteFile(
 		return nil, fmt.Errorf("content must be a string")
 	}
 
+	// Handle empty or relative paths like "." or "./" by converting to absolute path
+	if path == "." || path == "./" {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Error resolving current directory: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil
+		}
+		path = cwd
+	}
+
 	validPath, err := s.validatePath(path)
 	if err != nil {
 		return &mcp.CallToolResult{
@@ -704,6 +742,24 @@ func (s *FilesystemServer) handleListDirectory(
 	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path must be a string")
+	}
+
+	// Handle empty or relative paths like "." or "./" by converting to absolute path
+	if path == "." || path == "./" {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Error resolving current directory: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil
+		}
+		path = cwd
 	}
 
 	validPath, err := s.validatePath(path)
@@ -807,6 +863,24 @@ func (s *FilesystemServer) handleCreateDirectory(
 		return nil, fmt.Errorf("path must be a string")
 	}
 
+	// Handle empty or relative paths like "." or "./" by converting to absolute path
+	if path == "." || path == "./" {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Error resolving current directory: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil
+		}
+		path = cwd
+	}
+
 	validPath, err := s.validatePath(path)
 	if err != nil {
 		return &mcp.CallToolResult{
@@ -894,6 +968,42 @@ func (s *FilesystemServer) handleMoveFile(
 	destination, ok := request.Params.Arguments["destination"].(string)
 	if !ok {
 		return nil, fmt.Errorf("destination must be a string")
+	}
+
+	// Handle empty or relative paths for source
+	if source == "." || source == "./" {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Error resolving current directory: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil
+		}
+		source = cwd
+	}
+
+	// Handle empty or relative paths for destination
+	if destination == "." || destination == "./" {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Error resolving current directory: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil
+		}
+		destination = cwd
 	}
 
 	validSource, err := s.validatePath(source)
@@ -997,6 +1107,24 @@ func (s *FilesystemServer) handleSearchFiles(
 		return nil, fmt.Errorf("pattern must be a string")
 	}
 
+	// Handle empty or relative paths like "." or "./" by converting to absolute path
+	if path == "." || path == "./" {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Error resolving current directory: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil
+		}
+		path = cwd
+	}
+
 	validPath, err := s.validatePath(path)
 	if err != nil {
 		return &mcp.CallToolResult{
@@ -1097,6 +1225,24 @@ func (s *FilesystemServer) handleGetFileInfo(
 	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path must be a string")
+	}
+
+	// Handle empty or relative paths like "." or "./" by converting to absolute path
+	if path == "." || path == "./" {
+		// Get current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Error resolving current directory: %v", err),
+					},
+				},
+				IsError: true,
+			}, nil
+		}
+		path = cwd
 	}
 
 	validPath, err := s.validatePath(path)
