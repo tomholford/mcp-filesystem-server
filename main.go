@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
+	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +14,13 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+)
+
+const (
+	// Maximum size for inline content (5MB)
+	MAX_INLINE_SIZE = 5 * 1024 * 1024
+	// Maximum size for base64 encoding (1MB)
+	MAX_BASE64_SIZE = 1 * 1024 * 1024
 )
 
 type FileInfo struct {
@@ -58,9 +68,17 @@ func NewFilesystemServer(allowedDirs []string) (*FilesystemServer, error) {
 		allowedDirs: normalized,
 		server: server.NewMCPServer(
 			"secure-filesystem-server",
-			"0.2.0",
+			"0.3.0",
+			server.WithResourceCapabilities(true, true),
 		),
 	}
+
+	// Register resource handlers
+	s.server.AddResource(mcp.NewResource(
+		"file://",
+		"File System",
+		mcp.WithResourceDescription("Access to files and directories on the local file system"),
+	), s.handleReadResource)
 
 	// Register tool handlers
 	s.server.AddTool(mcp.NewTool(
@@ -265,6 +283,169 @@ func (s *FilesystemServer) searchFiles(
 	return results, nil
 }
 
+// detectMimeType tries to determine the MIME type of a file
+func detectMimeType(path string) string {
+	// First try by extension
+	ext := filepath.Ext(path)
+	if ext != "" {
+		mimeType := mime.TypeByExtension(ext)
+		if mimeType != "" {
+			return mimeType
+		}
+	}
+
+	// If that fails, try to read a bit of the file
+	file, err := os.Open(path)
+	if err != nil {
+		return "application/octet-stream" // Default
+	}
+	defer file.Close()
+
+	// Read first 512 bytes to detect content type
+	buffer := make([]byte, 512)
+	n, err := file.Read(buffer)
+	if err != nil {
+		return "application/octet-stream" // Default
+	}
+
+	// Use http.DetectContentType
+	return http.DetectContentType(buffer[:n])
+}
+
+// isTextFile determines if a file is likely a text file based on MIME type
+func isTextFile(mimeType string) bool {
+	return strings.HasPrefix(mimeType, "text/") ||
+		mimeType == "application/json" ||
+		mimeType == "application/xml" ||
+		mimeType == "application/javascript" ||
+		mimeType == "application/x-javascript" ||
+		strings.Contains(mimeType, "+xml") ||
+		strings.Contains(mimeType, "+json")
+}
+
+// pathToResourceURI converts a file path to a resource URI
+func pathToResourceURI(path string) string {
+	return "file://" + path
+}
+
+// Resource handler
+func (s *FilesystemServer) handleReadResource(
+	ctx context.Context,
+	request mcp.ReadResourceRequest,
+) ([]mcp.ResourceContents, error) {
+	uri := request.Params.URI
+	
+	// Check if it's a file:// URI
+	if !strings.HasPrefix(uri, "file://") {
+		return nil, fmt.Errorf("unsupported URI scheme: %s", uri)
+	}
+	
+	// Extract the path from the URI
+	path := strings.TrimPrefix(uri, "file://")
+	
+	// Validate the path
+	validPath, err := s.validatePath(path)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Get file info
+	fileInfo, err := os.Stat(validPath)
+	if err != nil {
+		return nil, err
+	}
+	
+	// If it's a directory, return a listing
+	if fileInfo.IsDir() {
+		entries, err := os.ReadDir(validPath)
+		if err != nil {
+			return nil, err
+		}
+		
+		var result strings.Builder
+		result.WriteString(fmt.Sprintf("Directory listing for: %s\n\n", validPath))
+		
+		for _, entry := range entries {
+			entryPath := filepath.Join(validPath, entry.Name())
+			entryURI := pathToResourceURI(entryPath)
+			
+			if entry.IsDir() {
+				result.WriteString(fmt.Sprintf("[DIR]  %s (%s)\n", entry.Name(), entryURI))
+			} else {
+				info, err := entry.Info()
+				if err == nil {
+					result.WriteString(fmt.Sprintf("[FILE] %s (%s) - %d bytes\n", 
+						entry.Name(), entryURI, info.Size()))
+				} else {
+					result.WriteString(fmt.Sprintf("[FILE] %s (%s)\n", entry.Name(), entryURI))
+				}
+			}
+		}
+		
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      uri,
+				MIMEType: "text/plain",
+				Text:     result.String(),
+			},
+		}, nil
+	}
+	
+	// It's a file, determine how to handle it
+	mimeType := detectMimeType(validPath)
+	
+	// Check file size
+	if fileInfo.Size() > MAX_INLINE_SIZE {
+		// File is too large to inline, return a reference instead
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      uri,
+				MIMEType: "text/plain",
+				Text:     fmt.Sprintf("File is too large to display inline (%d bytes). Use the read_file tool to access specific portions.", fileInfo.Size()),
+			},
+		}, nil
+	}
+	
+	// Read the file content
+	content, err := os.ReadFile(validPath)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Handle based on content type
+	if isTextFile(mimeType) {
+		// It's a text file, return as text
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      uri,
+				MIMEType: mimeType,
+				Text:     string(content),
+			},
+		}, nil
+	} else {
+		// It's a binary file
+		if fileInfo.Size() <= MAX_BASE64_SIZE {
+			// Small enough for base64 encoding
+			return []mcp.ResourceContents{
+				mcp.BlobResourceContents{
+					URI:      uri,
+					MIMEType: mimeType,
+					Blob:     base64.StdEncoding.EncodeToString(content),
+				},
+			}, nil
+		} else {
+			// Too large for base64, return a reference
+			return []mcp.ResourceContents{
+				mcp.TextResourceContents{
+					URI:      uri,
+					MIMEType: "text/plain",
+					Text:     fmt.Sprintf("Binary file (%s, %d bytes). Use the read_file tool to access specific portions.", mimeType, fileInfo.Size()),
+				},
+			}, nil
+		}
+	}
+}
+
 // Tool handlers
 
 func (s *FilesystemServer) handleReadFile(
@@ -304,17 +485,52 @@ func (s *FilesystemServer) handleReadFile(
 	}
 	
 	if info.IsDir() {
+		// For directories, return a resource reference instead
+		resourceURI := pathToResourceURI(validPath)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
-					Text: "Error: Cannot read a directory, use list_directory instead",
+					Text: fmt.Sprintf("This is a directory. Use the resource URI to browse its contents: %s", resourceURI),
+				},
+				mcp.EmbeddedResource{
+					Type: "resource",
+					Resource: mcp.TextResourceContents{
+						URI:      resourceURI,
+						MIMEType: "text/plain",
+						Text:     fmt.Sprintf("Directory: %s", validPath),
+					},
 				},
 			},
-			IsError: true,
 		}, nil
 	}
 
+	// Determine MIME type
+	mimeType := detectMimeType(validPath)
+	
+	// Check file size
+	if info.Size() > MAX_INLINE_SIZE {
+		// File is too large to inline, return a resource reference
+		resourceURI := pathToResourceURI(validPath)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("File is too large to display inline (%d bytes). Access it via resource URI: %s", info.Size(), resourceURI),
+				},
+				mcp.EmbeddedResource{
+					Type: "resource",
+					Resource: mcp.TextResourceContents{
+						URI:      resourceURI,
+						MIMEType: "text/plain",
+						Text:     fmt.Sprintf("Large file: %s (%s, %d bytes)", validPath, mimeType, info.Size()),
+					},
+				},
+			},
+		}, nil
+	}
+
+	// Read file content
 	content, err := os.ReadFile(validPath)
 	if err != nil {
 		return &mcp.CallToolResult{
@@ -328,14 +544,59 @@ func (s *FilesystemServer) handleReadFile(
 		}, nil
 	}
 
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			mcp.TextContent{
-				Type: "text",
-				Text: string(content),
+	// Handle based on content type
+	if isTextFile(mimeType) {
+		// It's a text file, return as text
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: string(content),
+				},
 			},
-		},
-	}, nil
+		}, nil
+	} else {
+		// It's a binary file
+		resourceURI := pathToResourceURI(validPath)
+		
+		if info.Size() <= MAX_BASE64_SIZE {
+			// Small enough for base64 encoding
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Binary file: %s (%s, %d bytes)", validPath, mimeType, info.Size()),
+					},
+					mcp.EmbeddedResource{
+						Type: "resource",
+						Resource: mcp.BlobResourceContents{
+							URI:      resourceURI,
+							MIMEType: mimeType,
+							Blob:     base64.StdEncoding.EncodeToString(content),
+						},
+					},
+				},
+			}, nil
+		} else {
+			// Too large for base64, return a reference
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Binary file: %s (%s, %d bytes). Access it via resource URI: %s", validPath, mimeType, info.Size(), resourceURI),
+					},
+					mcp.EmbeddedResource{
+						Type: "resource",
+						Resource: mcp.TextResourceContents{
+							URI:      resourceURI,
+							MIMEType: "text/plain",
+							Text:     fmt.Sprintf("Binary file: %s (%s, %d bytes)", validPath, mimeType, info.Size()),
+						},
+					},
+				},
+			}, nil
+		}
+	}
 }
 
 func (s *FilesystemServer) handleWriteFile(
@@ -403,11 +664,34 @@ func (s *FilesystemServer) handleWriteFile(
 		}, nil
 	}
 
+	// Get file info for the response
+	info, err := os.Stat(validPath)
+	if err != nil {
+		// File was written but we couldn't get info
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Successfully wrote to %s", path),
+				},
+			},
+		}, nil
+	}
+
+	resourceURI := pathToResourceURI(validPath)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
-				Text: fmt.Sprintf("Successfully wrote to %s", path),
+				Text: fmt.Sprintf("Successfully wrote %d bytes to %s", info.Size(), path),
+			},
+			mcp.EmbeddedResource{
+				Type: "resource",
+				Resource: mcp.TextResourceContents{
+					URI:      resourceURI,
+					MIMEType: "text/plain",
+					Text:     fmt.Sprintf("File: %s (%d bytes)", validPath, info.Size()),
+				},
 			},
 		},
 	}, nil
@@ -478,18 +762,37 @@ func (s *FilesystemServer) handleListDirectory(
 	result.WriteString(fmt.Sprintf("Directory listing for: %s\n\n", validPath))
 	
 	for _, entry := range entries {
-		prefix := "[FILE]"
+		entryPath := filepath.Join(validPath, entry.Name())
+		resourceURI := pathToResourceURI(entryPath)
+		
 		if entry.IsDir() {
-			prefix = "[DIR] "
+			result.WriteString(fmt.Sprintf("[DIR]  %s (%s)\n", entry.Name(), resourceURI))
+		} else {
+			info, err := entry.Info()
+			if err == nil {
+				result.WriteString(fmt.Sprintf("[FILE] %s (%s) - %d bytes\n", 
+					entry.Name(), resourceURI, info.Size()))
+			} else {
+				result.WriteString(fmt.Sprintf("[FILE] %s (%s)\n", entry.Name(), resourceURI))
+			}
 		}
-		fmt.Fprintf(&result, "%s %s\n", prefix, entry.Name())
 	}
 
+	// Return both text content and embedded resource
+	resourceURI := pathToResourceURI(validPath)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: result.String(),
+			},
+			mcp.EmbeddedResource{
+				Type: "resource",
+				Resource: mcp.TextResourceContents{
+					URI:      resourceURI,
+					MIMEType: "text/plain",
+					Text:     fmt.Sprintf("Directory: %s", validPath),
+				},
 			},
 		},
 	}, nil
@@ -520,11 +823,20 @@ func (s *FilesystemServer) handleCreateDirectory(
 	// Check if path already exists
 	if info, err := os.Stat(validPath); err == nil {
 		if info.IsDir() {
+			resourceURI := pathToResourceURI(validPath)
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
 					mcp.TextContent{
 						Type: "text",
 						Text: fmt.Sprintf("Directory already exists: %s", path),
+					},
+					mcp.EmbeddedResource{
+						Type: "resource",
+						Resource: mcp.TextResourceContents{
+							URI:      resourceURI,
+							MIMEType: "text/plain",
+							Text:     fmt.Sprintf("Directory: %s", validPath),
+						},
 					},
 				},
 			}, nil
@@ -552,11 +864,20 @@ func (s *FilesystemServer) handleCreateDirectory(
 		}, nil
 	}
 
+	resourceURI := pathToResourceURI(validPath)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf("Successfully created directory %s", path),
+			},
+			mcp.EmbeddedResource{
+				Type: "resource",
+				Resource: mcp.TextResourceContents{
+					URI:      resourceURI,
+					MIMEType: "text/plain",
+					Text:     fmt.Sprintf("Directory: %s", validPath),
+				},
 			},
 		},
 	}, nil
@@ -640,6 +961,7 @@ func (s *FilesystemServer) handleMoveFile(
 		}, nil
 	}
 
+	resourceURI := pathToResourceURI(validDest)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
@@ -649,6 +971,14 @@ func (s *FilesystemServer) handleMoveFile(
 					source,
 					destination,
 				),
+			},
+			mcp.EmbeddedResource{
+				Type: "resource",
+				Resource: mcp.TextResourceContents{
+					URI:      resourceURI,
+					MIMEType: "text/plain",
+					Text:     fmt.Sprintf("Moved file: %s", validDest),
+				},
 			},
 		},
 	}, nil
@@ -731,11 +1061,30 @@ func (s *FilesystemServer) handleSearchFiles(
 		}, nil
 	}
 
+	// Format results with resource URIs
+	var formattedResults strings.Builder
+	formattedResults.WriteString(fmt.Sprintf("Found %d results:\n\n", len(results)))
+	
+	for _, result := range results {
+		resourceURI := pathToResourceURI(result)
+		info, err := os.Stat(result)
+		if err == nil {
+			if info.IsDir() {
+				formattedResults.WriteString(fmt.Sprintf("[DIR]  %s (%s)\n", result, resourceURI))
+			} else {
+				formattedResults.WriteString(fmt.Sprintf("[FILE] %s (%s) - %d bytes\n", 
+					result, resourceURI, info.Size()))
+			}
+		} else {
+			formattedResults.WriteString(fmt.Sprintf("%s (%s)\n", result, resourceURI))
+		}
+	}
+
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
-				Text: fmt.Sprintf("Found %d results:\n%s", len(results), strings.Join(results, "\n")),
+				Text: formattedResults.String(),
 			},
 		},
 	}, nil
@@ -776,12 +1125,19 @@ func (s *FilesystemServer) handleGetFileInfo(
 		}, nil
 	}
 
+	// Get MIME type for files
+	mimeType := "directory"
+	if info.IsFile {
+		mimeType = detectMimeType(validPath)
+	}
+
+	resourceURI := pathToResourceURI(validPath)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf(
-					"File information for: %s\n\nSize: %d bytes\nCreated: %s\nModified: %s\nAccessed: %s\nIsDirectory: %v\nIsFile: %v\nPermissions: %s",
+					"File information for: %s\n\nSize: %d bytes\nCreated: %s\nModified: %s\nAccessed: %s\nIsDirectory: %v\nIsFile: %v\nPermissions: %s\nMIME Type: %s\nResource URI: %s",
 					validPath,
 					info.Size,
 					info.Created.Format(time.RFC3339),
@@ -790,7 +1146,21 @@ func (s *FilesystemServer) handleGetFileInfo(
 					info.IsDirectory,
 					info.IsFile,
 					info.Permissions,
+					mimeType,
+					resourceURI,
 				),
+			},
+			mcp.EmbeddedResource{
+				Type: "resource",
+				Resource: mcp.TextResourceContents{
+					URI:      resourceURI,
+					MIMEType: "text/plain",
+					Text:     fmt.Sprintf("%s: %s (%s, %d bytes)", 
+						info.IsDirectory ? "Directory" : "File", 
+						validPath, 
+						mimeType, 
+						info.Size),
+				},
 			},
 		},
 	}, nil
@@ -806,14 +1176,19 @@ func (s *FilesystemServer) handleListAllowedDirectories(
 		displayDirs[i] = strings.TrimSuffix(dir, string(filepath.Separator))
 	}
 
+	var result strings.Builder
+	result.WriteString("Allowed directories:\n\n")
+	
+	for _, dir := range displayDirs {
+		resourceURI := pathToResourceURI(dir)
+		result.WriteString(fmt.Sprintf("%s (%s)\n", dir, resourceURI))
+	}
+
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
-				Text: fmt.Sprintf(
-					"Allowed directories:\n%s",
-					strings.Join(displayDirs, "\n"),
-				),
+				Text: result.String(),
 			},
 		},
 	}, nil
