@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -56,129 +57,89 @@ func NewFilesystemServer(allowedDirs []string) (*FilesystemServer, error) {
 		server: server.NewMCPServer(
 			"secure-filesystem-server",
 			"0.2.0",
-			server.WithToolCapabilities(true),
 		),
 	}
 
 	// Register tool handlers
-	s.server.AddTool(mcp.Tool{
-		Name:        "read_file",
-		Description: "Read the complete contents of a file from the file system.",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to the file to read",
-				},
-			},
-		},
-	}, s.handleReadFile)
+	s.server.AddTool(mcp.NewTool(
+		"read_file",
+		mcp.WithDescription("Read the complete contents of a file from the file system."),
+		mcp.WithString("path",
+			mcp.Description("Path to the file to read"),
+			mcp.Required(),
+		),
+	), s.handleReadFile)
 
-	s.server.AddTool(mcp.Tool{
-		Name:        "write_file",
-		Description: "Create a new file or overwrite an existing file with new content.",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path where to write the file",
-				},
-				"content": map[string]interface{}{
-					"type":        "string",
-					"description": "Content to write to the file",
-				},
-			},
-		},
-	}, s.handleWriteFile)
+	s.server.AddTool(mcp.NewTool(
+		"write_file",
+		mcp.WithDescription("Create a new file or overwrite an existing file with new content."),
+		mcp.WithString("path",
+			mcp.Description("Path where to write the file"),
+			mcp.Required(),
+		),
+		mcp.WithString("content",
+			mcp.Description("Content to write to the file"),
+			mcp.Required(),
+		),
+	), s.handleWriteFile)
 
-	s.server.AddTool(mcp.Tool{
-		Name:        "list_directory",
-		Description: "Get a detailed listing of all files and directories in a specified path.",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path of the directory to list",
-				},
-			},
-		},
-	}, s.handleListDirectory)
+	s.server.AddTool(mcp.NewTool(
+		"list_directory",
+		mcp.WithDescription("Get a detailed listing of all files and directories in a specified path."),
+		mcp.WithString("path",
+			mcp.Description("Path of the directory to list"),
+			mcp.Required(),
+		),
+	), s.handleListDirectory)
 
-	s.server.AddTool(mcp.Tool{
-		Name:        "create_directory",
-		Description: "Create a new directory or ensure a directory exists.",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path of the directory to create",
-				},
-			},
-		},
-	}, s.handleCreateDirectory)
+	s.server.AddTool(mcp.NewTool(
+		"create_directory",
+		mcp.WithDescription("Create a new directory or ensure a directory exists."),
+		mcp.WithString("path",
+			mcp.Description("Path of the directory to create"),
+			mcp.Required(),
+		),
+	), s.handleCreateDirectory)
 
-	s.server.AddTool(mcp.Tool{
-		Name:        "move_file",
-		Description: "Move or rename files and directories.",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"source": map[string]interface{}{
-					"type":        "string",
-					"description": "Source path of the file or directory",
-				},
-				"destination": map[string]interface{}{
-					"type":        "string",
-					"description": "Destination path",
-				},
-			},
-		},
-	}, s.handleMoveFile)
+	s.server.AddTool(mcp.NewTool(
+		"move_file",
+		mcp.WithDescription("Move or rename files and directories."),
+		mcp.WithString("source",
+			mcp.Description("Source path of the file or directory"),
+			mcp.Required(),
+		),
+		mcp.WithString("destination",
+			mcp.Description("Destination path"),
+			mcp.Required(),
+		),
+	), s.handleMoveFile)
 
-	s.server.AddTool(mcp.Tool{
-		Name:        "search_files",
-		Description: "Recursively search for files and directories matching a pattern.",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Starting path for the search",
-				},
-				"pattern": map[string]interface{}{
-					"type":        "string",
-					"description": "Search pattern to match against file names",
-				},
-			},
-		},
-	}, s.handleSearchFiles)
+	s.server.AddTool(mcp.NewTool(
+		"search_files",
+		mcp.WithDescription("Recursively search for files and directories matching a pattern."),
+		mcp.WithString("path",
+			mcp.Description("Starting path for the search"),
+			mcp.Required(),
+		),
+		mcp.WithString("pattern",
+			mcp.Description("Search pattern to match against file names"),
+			mcp.Required(),
+		),
+	), s.handleSearchFiles)
 
-	s.server.AddTool(mcp.Tool{
-		Name:        "get_file_info",
-		Description: "Retrieve detailed metadata about a file or directory.",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to the file or directory",
-				},
-			},
-		},
-	}, s.handleGetFileInfo)
+	s.server.AddTool(mcp.NewTool(
+		"get_file_info",
+		mcp.WithDescription("Retrieve detailed metadata about a file or directory."),
+		mcp.WithString("path",
+			mcp.Description("Path to the file or directory"),
+			mcp.Required(),
+		),
+	), s.handleGetFileInfo)
 
-	s.server.AddTool(mcp.Tool{
-		Name:        "list_allowed_directories",
-		Description: "Returns the list of directories that this server is allowed to access.",
-		InputSchema: mcp.ToolInputSchema{
-			Type:       "object",
-			Properties: map[string]interface{}{},
-		},
-	}, s.handleListAllowedDirectories)
+	s.server.AddTool(mcp.NewTool(
+		"list_allowed_directories",
+		mcp.WithDescription("Returns the list of directories that this server is allowed to access."),
+	), s.handleListAllowedDirectories)
 
 	return s, nil
 }
@@ -290,9 +251,10 @@ func (s *FilesystemServer) searchFiles(
 // Tool handlers
 
 func (s *FilesystemServer) handleReadFile(
-	arguments map[string]interface{},
+	ctx context.Context,
+	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	path, ok := arguments["path"].(string)
+	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path must be a string")
 	}
@@ -305,7 +267,7 @@ func (s *FilesystemServer) handleReadFile(
 	content, err := os.ReadFile(validPath)
 	if err != nil {
 		return &mcp.CallToolResult{
-			Content: []interface{}{
+			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf("Error reading file: %v", err),
@@ -316,7 +278,7 @@ func (s *FilesystemServer) handleReadFile(
 	}
 
 	return &mcp.CallToolResult{
-		Content: []interface{}{
+		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: string(content),
@@ -326,13 +288,14 @@ func (s *FilesystemServer) handleReadFile(
 }
 
 func (s *FilesystemServer) handleWriteFile(
-	arguments map[string]interface{},
+	ctx context.Context,
+	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	path, ok := arguments["path"].(string)
+	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path must be a string")
 	}
-	content, ok := arguments["content"].(string)
+	content, ok := request.Params.Arguments["content"].(string)
 	if !ok {
 		return nil, fmt.Errorf("content must be a string")
 	}
@@ -344,7 +307,7 @@ func (s *FilesystemServer) handleWriteFile(
 
 	if err := os.WriteFile(validPath, []byte(content), 0644); err != nil {
 		return &mcp.CallToolResult{
-			Content: []interface{}{
+			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf("Error writing file: %v", err),
@@ -355,7 +318,7 @@ func (s *FilesystemServer) handleWriteFile(
 	}
 
 	return &mcp.CallToolResult{
-		Content: []interface{}{
+		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf("Successfully wrote to %s", path),
@@ -365,9 +328,10 @@ func (s *FilesystemServer) handleWriteFile(
 }
 
 func (s *FilesystemServer) handleListDirectory(
-	arguments map[string]interface{},
+	ctx context.Context,
+	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	path, ok := arguments["path"].(string)
+	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path must be a string")
 	}
@@ -380,7 +344,7 @@ func (s *FilesystemServer) handleListDirectory(
 	entries, err := os.ReadDir(validPath)
 	if err != nil {
 		return &mcp.CallToolResult{
-			Content: []interface{}{
+			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf("Error reading directory: %v", err),
@@ -400,7 +364,7 @@ func (s *FilesystemServer) handleListDirectory(
 	}
 
 	return &mcp.CallToolResult{
-		Content: []interface{}{
+		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: result.String(),
@@ -410,9 +374,10 @@ func (s *FilesystemServer) handleListDirectory(
 }
 
 func (s *FilesystemServer) handleCreateDirectory(
-	arguments map[string]interface{},
+	ctx context.Context,
+	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	path, ok := arguments["path"].(string)
+	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path must be a string")
 	}
@@ -424,7 +389,7 @@ func (s *FilesystemServer) handleCreateDirectory(
 
 	if err := os.MkdirAll(validPath, 0755); err != nil {
 		return &mcp.CallToolResult{
-			Content: []interface{}{
+			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf("Error creating directory: %v", err),
@@ -435,7 +400,7 @@ func (s *FilesystemServer) handleCreateDirectory(
 	}
 
 	return &mcp.CallToolResult{
-		Content: []interface{}{
+		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf("Successfully created directory %s", path),
@@ -445,13 +410,14 @@ func (s *FilesystemServer) handleCreateDirectory(
 }
 
 func (s *FilesystemServer) handleMoveFile(
-	arguments map[string]interface{},
+	ctx context.Context,
+	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	source, ok := arguments["source"].(string)
+	source, ok := request.Params.Arguments["source"].(string)
 	if !ok {
 		return nil, fmt.Errorf("source must be a string")
 	}
-	destination, ok := arguments["destination"].(string)
+	destination, ok := request.Params.Arguments["destination"].(string)
 	if !ok {
 		return nil, fmt.Errorf("destination must be a string")
 	}
@@ -467,7 +433,7 @@ func (s *FilesystemServer) handleMoveFile(
 
 	if err := os.Rename(validSource, validDest); err != nil {
 		return &mcp.CallToolResult{
-			Content: []interface{}{
+			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf("Error moving file: %v", err),
@@ -478,7 +444,7 @@ func (s *FilesystemServer) handleMoveFile(
 	}
 
 	return &mcp.CallToolResult{
-		Content: []interface{}{
+		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf(
@@ -492,13 +458,14 @@ func (s *FilesystemServer) handleMoveFile(
 }
 
 func (s *FilesystemServer) handleSearchFiles(
-	arguments map[string]interface{},
+	ctx context.Context,
+	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	path, ok := arguments["path"].(string)
+	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path must be a string")
 	}
-	pattern, ok := arguments["pattern"].(string)
+	pattern, ok := request.Params.Arguments["pattern"].(string)
 	if !ok {
 		return nil, fmt.Errorf("pattern must be a string")
 	}
@@ -511,7 +478,7 @@ func (s *FilesystemServer) handleSearchFiles(
 	results, err := s.searchFiles(validPath, pattern)
 	if err != nil {
 		return &mcp.CallToolResult{
-			Content: []interface{}{
+			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf("Error searching files: %v",
@@ -523,7 +490,7 @@ func (s *FilesystemServer) handleSearchFiles(
 	}
 
 	return &mcp.CallToolResult{
-		Content: []interface{}{
+		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: strings.Join(results, "\n"),
@@ -533,9 +500,10 @@ func (s *FilesystemServer) handleSearchFiles(
 }
 
 func (s *FilesystemServer) handleGetFileInfo(
-	arguments map[string]interface{},
+	ctx context.Context,
+	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	path, ok := arguments["path"].(string)
+	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path must be a string")
 	}
@@ -548,7 +516,7 @@ func (s *FilesystemServer) handleGetFileInfo(
 	info, err := s.getFileStats(validPath)
 	if err != nil {
 		return &mcp.CallToolResult{
-			Content: []interface{}{
+			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
 					Text: fmt.Sprintf("Error getting file info: %v", err),
@@ -559,7 +527,7 @@ func (s *FilesystemServer) handleGetFileInfo(
 	}
 
 	return &mcp.CallToolResult{
-		Content: []interface{}{
+		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf(
@@ -578,10 +546,11 @@ func (s *FilesystemServer) handleGetFileInfo(
 }
 
 func (s *FilesystemServer) handleListAllowedDirectories(
-	arguments map[string]interface{},
+	ctx context.Context,
+	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
 	return &mcp.CallToolResult{
-		Content: []interface{}{
+		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
 				Text: fmt.Sprintf(
