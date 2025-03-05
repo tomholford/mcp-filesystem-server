@@ -1,0 +1,33 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - allowedDirectories
+    properties:
+      allowedDirectories:
+        type: array
+        items:
+          type: string
+        description: List of allowed directories that the MCP server is permitted to access.
+    default:
+      allowedDirectories:
+        - /app
+    description: Configuration for allowed directories to access by the filesystem
+      MCP server.
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => { 
+      // Build the command to run the filesystem MCP server using allowed directories that exist in the container.
+      return {
+        command: './mcp-filesystem-server',
+        args: config.allowedDirectories
+      };
+    }
+  exampleConfig:
+    allowedDirectories:
+      - /app
