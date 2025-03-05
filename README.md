@@ -1,3 +1,5 @@
+[![smithery badge](https://smithery.ai/badge/@mark3labs/mcp-filesystem-server)](https://smithery.ai/server/@mark3labs/mcp-filesystem-server)
+
 # Filesystem MCP Server
 
 Go server implementing Model Context Protocol (MCP) for filesystem operations.
