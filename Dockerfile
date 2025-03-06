@@ -20,8 +20,4 @@ WORKDIR /app
 # Copy the built binary from the builder stage
 COPY --from=builder /app/mcp-filesystem-server ./
 
-# Create a directory that will be used as allowed directory
-RUN mkdir -p /app
-
 ENTRYPOINT ["./mcp-filesystem-server"]
-CMD ["/app"]
