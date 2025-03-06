@@ -68,7 +68,7 @@ func NewFilesystemServer(allowedDirs []string) (*FilesystemServer, error) {
 		allowedDirs: normalized,
 		server: server.NewMCPServer(
 			"secure-filesystem-server",
-			"0.4.0",
+			"0.4.1",
 			server.WithResourceCapabilities(true, true),
 		),
 	}
@@ -461,7 +461,7 @@ func (s *FilesystemServer) handleReadFile(
 ) (*mcp.CallToolResult, error) {
 	path, ok := request.Params.Arguments["path"].(string)
 	if !ok {
-		return nil,  fmt.Errorf("path must be a string")
+		return nil, fmt.Errorf("path must be a string")
 	}
 
 	// Handle empty or relative paths like "." or "./" by converting to absolute path
