@@ -11,6 +11,7 @@ Go server implementing Model Context Protocol (MCP) for filesystem operations.
 - Move files/directories
 - Search files
 - Get file metadata
+- Generate directory tree structures
 
 **Note**: The server will only allow operations within directories specified via `args`.
 
@@ -73,6 +74,15 @@ Go server implementing Model Context Protocol (MCP) for filesystem operations.
     - Access time
     - Type (file/directory)
     - Permissions
+
+- **tree**
+  - Returns a hierarchical JSON representation of a directory structure
+  - Inputs:
+    - `path` (string): Directory to traverse (required)
+    - `depth` (number): Maximum depth to traverse (default: 3)
+    - `follow_symlinks` (boolean): Whether to follow symbolic links (default: false)
+  - Returns formatted JSON with file/directory hierarchy
+  - Includes file metadata (name, path, size, modified time)
 
 - **list_allowed_directories**
   - List all directories the server is allowed to access
